@@ -7,3 +7,4 @@ __pycache__/
 data/output_100k/
 data/reports_100k/
 data/input/events_100k.csv
+.venv/
