@@ -1,0 +1,9 @@
+myvenv/
+venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+data/output_100k/
+data/reports_100k/
+data/input/events_100k.csv

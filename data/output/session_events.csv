@@ -1,0 +1,7 @@
+event_id,user_id,event_type,event_timestamp,session_id,source_file,source_row_number
+e100,u1,login,2026-01-01T10:00:00+00:00,session_32f5e09813651b94d6e4,events.csv,2
+e101,u1,product_view,2026-01-01T10:05:00+00:00,session_32f5e09813651b94d6e4,events.csv,4
+e102,u1,add_to_cart,2026-01-01T10:10:00+00:00,session_32f5e09813651b94d6e4,events.csv,3
+e103,u1,purchase,2026-01-01T10:50:00+00:00,session_5f75058043843e83b4d4,events.csv,5
+e200,u2,login,2026-01-01T11:00:00+00:00,session_23f595cf217b13e46622,events.csv,6
+e201,u2,page_view,2026-01-01T11:30:00+00:00,session_23f595cf217b13e46622,events.csv,7

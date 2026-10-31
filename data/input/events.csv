@@ -1,0 +1,10 @@
+event_id,user_id,event_type,event_timestamp
+e100,u1,login,2026-01-01T10:00:00Z
+e102,u1,add_to_cart,2026-01-01T10:10:00Z
+e101,u1,product_view,2026-01-01T10:05:00Z
+e103,u1,purchase,2026-01-01T10:50:00Z
+e200,u2,login,2026-01-01T11:00:00Z
+e201,u2,page_view,2026-01-01T11:30:00Z
+e201,u2,page_view,2026-01-01T11:30:00Z
+e_bad,u3,page_view,
+e_bad2,u3,page_view,not-a-timestamp

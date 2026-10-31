@@ -1,0 +1,3 @@
+source_file,source_row_number,raw_record,reject_reason
+events.csv,9,"{'event_id': 'e_bad', 'user_id': 'u3', 'event_type': 'page_view', 'event_timestamp': '', 'source_file': 'events.csv', 'source_row_number': 9}",missing_required_field: event_timestamp
+events.csv,10,"{'event_id': 'e_bad2', 'user_id': 'u3', 'event_type': 'page_view', 'event_timestamp': 'not-a-timestamp', 'source_file': 'events.csv', 'source_row_number': 10}",invalid_timestamp: expected ISO-8601
