@@ -1,44 +1,63 @@
 # Clickstream Event-to-Sessionization Pipeline
 
-A beginner-friendly Python + MySQL data engineering project. It reads clickstream events from CSV, validates and quarantines bad records, deduplicates events, orders events by **event time**, assigns deterministic sessions, writes CSV outputs and optionally publishes results to MySQL.
+## About the Project
 
-## 1. Business rule and assumptions
+This project is built using Python and MySQL to process clickstream data and group user activities into sessions.
 
-- Input grain: one row per source event.
-- `event_id` is the stable event key and must be globally unique.
-- `user_id`, `event_type`, and `event_timestamp` are required.
-- Timestamps must be ISO-8601. A timezone offset is recommended; timestamps without an offset are treated as UTC.
-- Events are grouped by `user_id` and sorted by event timestamp, then `event_id` for deterministic ties.
-- A new session starts only when the gap from the previous event is **greater than** `--gap-minutes` (default 30). A gap exactly equal to 30 minutes stays in the same session.
-- Exact duplicate event rows are counted and skipped. If the same `event_id` appears with different content, the later conflicting row is quarantined.
-- Missing/invalid required fields and malformed CSV rows are quarantined with a reason and original row number.
-- Late/out-of-order events are handled when present in the same batch because processing sorts by event time. Cross-batch late-event correction is not automatic; rerun/backfill the affected input range.
-- Session IDs are deterministic: `session_` plus a SHA-256 digest of `user_id` and the first event ID in the session.
+It takes event data from a CSV file, checks the data for errors and duplicates, sorts events based on their timestamps, and groups them into sessions based on user activity.
 
-## 2. Architecture
+The processed data is saved into CSV files. It can also be stored in a MySQL database when needed.
+
+## 1. How Sessionization Works
+
+The project follows a few rules while processing events:
+
+- Each row in the input CSV represents one user event.
+- Every event must have a unique `event_id`.
+- The required fields are `event_id`, `user_id`, `event_type`, and `event_timestamp`.
+- Timestamps should follow the ISO-8601 format. If a timestamp has no timezone information, it is treated as UTC.
+- Events are grouped by user and arranged in chronological order.
+- A new session starts when the time gap between two consecutive events is greater than 30 minutes.
+- If the gap is exactly 30 minutes, both events remain in the same session.
+- Exact duplicate records are skipped and counted.
+- If the same event ID appears with different data, the conflicting record is rejected.
+- Records with missing or invalid values are moved to a separate rejection file.
+- Events received out of order are handled by sorting them before sessionization.
+
+Each session gets a unique and repeatable ID generated using the user's ID and the first event ID in that session.
+
+## 2. Project Workflow
+
+The pipeline processes the data in the following order:
 
 ```text
-CSV source
-   |
-   v
-Ingestion (read raw rows + source_file + row number)
-   |
-   v
-Validation + duplicate checks -------> rejects.csv
-   |
-   v
-Event-time sorting per user
-   |
-   v
-Sessionization (gap threshold)
-   |
-   v
-sessions.csv + session_events.csv + run_report.json
-   |
-   +---- optional MySQL publishing (upsert by deterministic keys)
+CSV Input
+    |
+    v
+Read and Ingest Events
+    |
+    v
+Validate Records
+    |
+    v
+Remove Duplicates
+    |
+    v
+Sort Events by Timestamp
+    |
+    v
+Create User Sessions
+    |
+    v
+Generate CSV Reports
+    |
+    v
+Optional MySQL Publishing
 ```
 
-## 3. Project structure
+Invalid records are saved separately in `rejects.csv`.
+
+## 3. Project Structure
 
 ```text
 clickstream_session_pipeline/
@@ -54,17 +73,27 @@ clickstream_session_pipeline/
 │   ├── test_validation.py
 │   └── test_sessionization.py
 ├── data/
-│   ├── input/events.csv
-│   ├── output/                 # generated outputs
-│   └── reports/                # generated run reports
-├── sql/schema.sql
+│   ├── input/
+│   │   └── events.csv
+│   ├── output/
+│   └── reports/
+├── sql/
+│   └── schema.sql
 ├── generate_data.py
 ├── run_pipeline.py
 ├── requirements.txt
 └── README.md
 ```
 
-## 4. Setup (Windows PowerShell)
+## 4. Setting Up the Project
+
+### Requirements
+
+- Python
+- MySQL (only needed for database publishing)
+- Required Python packages from `requirements.txt`
+
+### Create and activate a virtual environment
 
 ```powershell
 py -m venv .venv
@@ -72,93 +101,140 @@ py -m venv .venv
 pip install -r requirements.txt
 ```
 
-Run the local CSV pipeline (no database server required):
+### Run the pipeline with the sample data
 
 ```powershell
 python run_pipeline.py --input data/input/events.csv --output-dir data/output --report-dir data/reports --gap-minutes 30
 ```
 
-Generate a reproducible larger dataset:
+This processes the sample CSV file and generates the output files.
+
+### Generate 100,000 test records
+
+A separate script is included to generate a larger dataset for testing.
 
 ```powershell
 python generate_data.py --rows 100000 --output data/input/events_100k.csv --seed 42
 ```
 
-Run it:
+### Run the pipeline with the larger dataset
 
 ```powershell
 python run_pipeline.py --input data/input/events_100k.csv --output-dir data/output_100k --report-dir data/reports_100k --gap-minutes 30
 ```
 
-Run tests:
+### Run automated tests
 
 ```powershell
-pytest -q
+python -m pytest -v
 ```
 
-## 5. MySQL setup (optional)
+## 5. MySQL Configuration
 
-1. Start MySQL and create a database:
-   ```sql
-   CREATE DATABASE clickstream_db;
-   ```
-2. Apply `sql/schema.sql` to `clickstream_db`.
-3. Install dependencies from `requirements.txt`.
-4. Set environment variables (do not commit credentials):
-   ```powershell
-   $env:MYSQL_HOST="localhost"
-   $env:MYSQL_PORT="3306"
-   $env:MYSQL_USER="root"
-   $env:MYSQL_PASSWORD="your_password"
-   $env:MYSQL_DATABASE="clickstream_db"
-   ```
-5. Run with `--publish-mysql`:
-   ```powershell
-   python run_pipeline.py --input data/input/events.csv --output-dir data/output --report-dir data/reports --publish-mysql
-   ```
+MySQL is optional. The pipeline can run using CSV files without connecting to a database.
 
-MySQL publication uses `INSERT ... ON DUPLICATE KEY UPDATE` and deterministic primary keys, so rerunning the same output does not create duplicate target rows. The CSV outputs remain the local source of truth.
+To use MySQL, first create the database:
 
-## 6. Output files
+```sql
+CREATE DATABASE clickstream_db;
+```
 
-- `sessions.csv`: one row per session with start/end, event count, duration seconds and first/last event IDs.
-- `session_events.csv`: one row per accepted event with its assigned session ID.
-- `rejects.csv`: rejected rows with source file, row number, raw payload and reason.
-- `run_report.json`: run ID, status, timestamps, input/accepted/duplicate/rejected counts, output counts, elapsed time, threshold and failure reason.
+Run the SQL commands from `sql/schema.sql` to create the required tables.
 
-## 7. Reconciliation
+Set the database connection details in PowerShell:
 
-For a successful run:
+```powershell
+$env:MYSQL_HOST="localhost"
+$env:MYSQL_PORT="3306"
+$env:MYSQL_USER="root"
+$env:MYSQL_PASSWORD="your_password"
+$env:MYSQL_DATABASE="clickstream_db"
+```
 
-- `input_rows = accepted_unique_rows + exact_duplicate_rows + rejected_rows`
-- `accepted_unique_rows = session_event_rows`
-- `session_count = number of rows in sessions.csv`
-- Sum of `event_count` in `sessions.csv` equals number of rows in `session_events.csv`.
+Then run the pipeline with MySQL publishing enabled:
 
-The pipeline checks these conditions and writes them to the run report.
+```powershell
+python run_pipeline.py --input data/input/events.csv --output-dir data/output --report-dir data/reports --publish-mysql
+```
 
-## 8. Idempotency, retry and backfill
+The project uses MySQL's `INSERT ... ON DUPLICATE KEY UPDATE` to update existing records instead of creating duplicates when the same data is processed again.
 
-- Output CSV files are overwritten for each run, not appended.
-- Stable session IDs are derived from user ID and the first event ID.
-- MySQL rows are upserted by primary key.
-- Retry: rerun the same command after fixing infrastructure/configuration issues.
-- Backfill: rerun the complete affected input file or a corrected historical extract. If a late event changes a session's first event or splits/merges sessions, regenerate the affected target output and republish it. This starter project does not delete obsolete MySQL sessions automatically; for a clean backfill, truncate target tables first or add a run-scoped replacement strategy.
+Database credentials are read from environment variables and are not stored in the source code.
 
-## 9. Testing and performance
+## 6. Generated Output Files
 
-Tests cover normal sessions, exact threshold boundary, gap greater than threshold, out-of-order input, duplicate IDs, conflicting duplicate IDs, missing timestamps, malformed timestamps and empty input.
+After processing the input data, the pipeline generates these files:
 
-The generator uses a fixed random seed. A simple elapsed-time measurement is included in `run_report.json`. One reasonable next optimization for larger-than-memory inputs is partitioning by user ID and processing partitions independently, while keeping all events for a user in the same partition.
+- **sessions.csv:** Contains one row for each session, including its start time, end time, event count and duration.
+- **session_events.csv:** Contains the accepted events along with their assigned session IDs.
+- **rejects.csv:** Stores records that could not be processed and the reason for rejection.
+- **run_report.json:** Contains details about the pipeline execution, including record counts, processing time and run status.
 
-## 10. Known limitations / next steps
+## 7. Data Validation and Reconciliation
 
-- Batch-oriented, in-memory processing; not a streaming/continuous event-time engine.
-- No watermark-based late-event window or automatic cross-batch session repair.
-- Timestamp-naive values are assumed UTC; production feeds should require explicit offsets.
-- MySQL publishing is optional and needs a reachable MySQL instance.
-- For production, add schema versioning, structured logging, retention policies, monitoring/alerts and transactional run publication.
+I added checks to make sure the records are processed correctly.
 
-## 11. Design trade-offs
+The pipeline verifies that:
 
-This solution favors correctness and explainability over distributed infrastructure. Python's standard library keeps the core transformation lightweight and reproducible. CSV is used for easy review; MySQL is an optional analytical target. Deterministic ordering and IDs make retries predictable. Conflicting duplicate keys are rejected rather than silently choosing one version.
+- Total input records equal accepted records plus duplicates plus rejected records.
+- Every accepted event is assigned to a session.
+- The number of session records matches the rows in `sessions.csv`.
+- The total event count across all sessions matches the number of rows in `session_events.csv`.
+
+These checks are also recorded in `run_report.json`.
+
+## 8. Handling Reruns and Recovery
+
+The project is designed so that running the same input again does not unnecessarily create duplicate output records.
+
+- CSV output files are replaced each time the pipeline runs.
+- Session IDs remain consistent for the same input events.
+- MySQL uses upsert operations to handle existing records.
+- If a run fails because of a configuration or database issue, it can be run again after fixing the problem.
+- For historical data corrections, the affected input needs to be processed again.
+
+One limitation is that obsolete MySQL sessions are not automatically deleted during backfills. A clean backfill currently requires clearing the affected target data or implementing a replacement strategy.
+
+## 9. Testing and Performance
+
+I tested the pipeline with different scenarios to check whether it handles both normal and incorrect data.
+
+The automated tests cover:
+
+- Normal session creation.
+- Events with exactly a 30-minute gap.
+- Events with a gap greater than 30 minutes.
+- Events received out of order.
+- Duplicate event IDs.
+- Conflicting duplicate records.
+- Missing timestamps.
+- Invalid timestamps.
+- Empty input files.
+
+I also generated a dataset containing 100,000 events to check how the pipeline performs with a larger input.
+
+The generator uses a fixed random seed so that the test data can be reproduced.
+
+For datasets larger than available memory, the pipeline could be improved by processing users in separate partitions while keeping all events belonging to the same user together.
+
+## 10. Current Limitations
+
+There are a few things this project does not handle yet:
+
+- It processes data in batches rather than continuously.
+- It does not automatically repair sessions when late events arrive in a later batch.
+- Timestamps without timezone information are assumed to be UTC.
+- MySQL publishing requires a running and accessible database.
+- It does not automatically remove outdated MySQL sessions during backfills.
+
+In the future, the project could be improved with better logging, monitoring, database transaction handling and automatic recovery for late-arriving events.
+
+## 11. Design Decisions
+
+I chose Python because it makes data processing and validation straightforward. CSV files make it easy to inspect the input and output, while MySQL provides an option for storing processed results.
+
+I kept the pipeline divided into separate modules so that ingestion, validation, session creation and database publishing can be maintained independently.
+
+I also used deterministic session IDs and event sorting to make the results consistent when the same input is processed again.
+
+The main focus of this project is to process clickstream events accurately, handle incorrect data safely and make the results easy to verify.
